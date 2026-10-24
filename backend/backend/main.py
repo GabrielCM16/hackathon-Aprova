@@ -88,6 +88,11 @@ class Texto(BaseModel):
     texto: str
 
 
+class PerguntaContexto(BaseModel):
+    texto: str
+    historico: List[dict] = []  # [{pergunta, resposta}] das últimas trocas
+
+
 def _sessao_existente(sessao_id: str):
     s = obter_sessao(sessao_id, criar=False)
     if not s:
@@ -206,13 +211,36 @@ def editar_perguntas_rapidas(contexto_id: str, corpo: PerguntasRapidas):
 
 
 @app.post("/contextos/{contexto_id}/perguntar")
-async def perguntar_contexto(contexto_id: str, corpo: Texto):
+async def perguntar_contexto(contexto_id: str, corpo: PerguntaContexto):
     if not corpo.texto.strip():
         raise HTTPException(422, "pergunta vazia")
     try:
-        return await _contexto_existente(contexto_id).perguntar(corpo.texto.strip())
+        return await _contexto_existente(contexto_id).perguntar(corpo.texto.strip(), corpo.historico)
     except RuntimeError as e:
         raise HTTPException(503, f"Gemini indisponível: {e}")
+
+
+@app.post("/contextos/{contexto_id}/perguntar/stream")
+async def perguntar_contexto_stream(contexto_id: str, corpo: PerguntaContexto):
+    """Mesma resposta de /perguntar, em texto puro chegando aos pedaços.
+    Começa com a etiqueta [confirmado|pendente|nao_consta] e cita arquivos como [[nome]]."""
+    if not corpo.texto.strip():
+        raise HTTPException(422, "pergunta vazia")
+    pedacos = _contexto_existente(contexto_id).perguntar_stream(corpo.texto.strip(), corpo.historico)
+    try:
+        primeiro = await pedacos.__anext__()  # erro do Gemini ainda vira 503 aqui
+    except StopAsyncIteration:
+        primeiro = ""
+    except RuntimeError as e:
+        raise HTTPException(503, f"Gemini indisponível: {e}")
+
+    async def corpo_stream():
+        yield primeiro
+        async for pedaco in pedacos:
+            yield pedaco
+
+    return StreamingResponse(corpo_stream(), media_type="text/plain; charset=utf-8",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ---------- sessões (durante a reunião) ----------

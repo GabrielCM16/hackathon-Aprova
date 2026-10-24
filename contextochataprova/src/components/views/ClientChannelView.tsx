@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { ChatMessage } from '../../types';
+import { Confianca, nomeExibicao, separarConfianca } from '../../api';
 
 interface ClientChannelViewProps {
   title: string;
@@ -43,15 +44,40 @@ const Avatar: React.FC<{ msg: ChatMessage }> = ({ msg }) =>
     </div>
   );
 
+const ETIQUETAS: Record<Confianca, { rotulo: string; classe: string }> = {
+  confirmado: { rotulo: 'Confirmado no material', classe: 'bg-[#eefff9] text-[#055b40] border-[#19bf8b]/40' },
+  pendente: { rotulo: 'Pendente com o cliente', classe: 'bg-[#fff8eb] text-[#8a5300] border-[#f0a020]/40' },
+  nao_consta: { rotulo: 'Não consta no material', classe: 'bg-[#f5f7f7] text-[#656666] border-[#dee0e0]' },
+};
+
+// "[[arquivo.md]]" vira um chip que abre o documento no visualizador.
+const comCitacoes = (linha: string, onAbrir?: (nome: string) => void): React.ReactNode[] =>
+  linha.split(/(\[\[[^\]]+\]\])/g).filter(Boolean).map((parte, i) => {
+    const m = parte.match(/^\[\[([^\]]+)\]\]$/);
+    if (!m) return parte;
+    return (
+      <button
+        key={i}
+        type="button"
+        onClick={() => onAbrir?.(m[1])}
+        title="Abrir documento"
+        className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded-md border border-[#14bac4]/40 bg-[#e0f6f7] text-[#074a4e] hover:bg-[#c9eef0] text-[11px] font-medium align-middle cursor-pointer"
+      >
+        <FileText className="w-3 h-3" />
+        {nomeExibicao(m[1])}
+      </button>
+    );
+  });
+
 // Linhas que começam com "- " viram lista; o resto vira parágrafo.
-const TextoFormatado: React.FC<{ texto: string }> = ({ texto }) => {
+const TextoFormatado: React.FC<{ texto: string; onAbrir?: (nome: string) => void }> = ({ texto, onAbrir }) => {
   const blocos: React.ReactNode[] = [];
   let lista: string[] = [];
   const fecharLista = () => {
     if (lista.length) {
       blocos.push(
         <ul key={`l${blocos.length}`} className="space-y-1 pl-4 list-disc marker:text-[#0d787e]">
-          {lista.map((item, i) => <li key={i}>{item}</li>)}
+          {lista.map((item, i) => <li key={i}>{comCitacoes(item, onAbrir)}</li>)}
         </ul>
       );
       lista = [];
@@ -62,7 +88,7 @@ const TextoFormatado: React.FC<{ texto: string }> = ({ texto }) => {
     if (/^[-•*]\s+/.test(t)) lista.push(t.replace(/^[-•*]\s+/, ''));
     else {
       fecharLista();
-      if (t) blocos.push(<p key={`p${blocos.length}`}>{t}</p>);
+      if (t) blocos.push(<p key={`p${blocos.length}`}>{comCitacoes(t, onAbrir)}</p>);
     }
   });
   fecharLista();
@@ -181,7 +207,21 @@ export const ClientChannelView: React.FC<ClientChannelViewProps> = ({
                         : 'bg-white border border-[#dee0e0] text-[#1c1c1c] rounded-tl-md shadow-[0_1px_2px_rgba(0,0,0,0.04)]'
                     }`}
                   >
-                    {isOutgoing ? <p className="whitespace-pre-wrap">{msg.text}</p> : <TextoFormatado texto={msg.text} />}
+                    {isOutgoing ? (
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                    ) : (() => {
+                      const { confianca, corpo } = msg.aiProcessed ? separarConfianca(msg.text) : { confianca: null, corpo: msg.text };
+                      return (
+                        <>
+                          {confianca && (
+                            <span className={`inline-block mb-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${ETIQUETAS[confianca].classe}`}>
+                              {ETIQUETAS[confianca].rotulo}
+                            </span>
+                          )}
+                          <TextoFormatado texto={corpo} onAbrir={onOpenFileModal} />
+                        </>
+                      );
+                    })()}
                     {isOutgoing && (
                       <div className="flex justify-end mt-1 text-white/70">
                         <CheckCheck className="w-3.5 h-3.5" />

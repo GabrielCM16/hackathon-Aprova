@@ -49,7 +49,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-[#1c1c1c]">
-                  {fileName}
+                  {file?.name ?? fileName}
                 </h3>
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#eefff9] text-[#055b40] border border-[#19bf8b]/40">
                   {file?.status === 'processed' ? 'Extração concluída' : 'Aguardando processamento'}

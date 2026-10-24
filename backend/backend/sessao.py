@@ -266,8 +266,12 @@ class Sessao:
 
     def _texto_contexto(self) -> str:
         ctx = self.contexto
-        texto = ctx.texto if ctx else ""
-        return texto[: config.CONTEXTO_ANALISE_CHARS] if texto else "(nenhum contexto carregado)"
+        if not ctx or not ctx.texto:
+            return "(nenhum contexto carregado)"
+        # O consolidado resume; as extrações trazem o detalhe de cada documento
+        extracoes = ctx.texto_extracoes()
+        texto = ctx.texto + (f"\n\n# Documentos (extração de cada arquivo)\n{extracoes}" if extracoes else "")
+        return texto[: config.CONTEXTO_ANALISE_CHARS]
 
     def _texto_checklist(self) -> str:
         if not self.checklist:

@@ -10,7 +10,8 @@ import { DocumentViewerModal } from './components/DocumentViewerModal';
 import { JsonEditorModal } from './components/JsonEditorModal';
 import {
   buscarContexto,
-  perguntarContexto,
+  perguntarContextoStream,
+  TrocaChat,
   ContextoCompleto,
   PASTAS,
   arquivosParaTela,
@@ -95,21 +96,37 @@ export default function App() {
       text,
       isOutgoing: true
     };
+    // Memória: as últimas trocas (pergunta do implantador + resposta da IA) vão junto
+    const historico: TrocaChat[] = [];
+    chatMessages.forEach((m, i) => {
+      const resposta = chatMessages[i + 1];
+      if (m.isOutgoing && resposta?.aiProcessed && m.text && resposta.text) {
+        historico.push({ pergunta: m.text, resposta: resposta.text });
+      }
+    });
+
     setChatMessages(prev => [...prev, newMsg]);
     setIaDigitando(true);
 
-    perguntarContexto(text)
-      .then(({ resposta }) => {
+    const idResposta = `msg-${Date.now() + 1}`;
+    let criada = false;
+    perguntarContextoStream(text, historico.slice(-8), (acumulado) => {
+      // Os três pontinhos somem quando o primeiro pedaço chega; daí o texto vai crescendo
+      if (!criada) {
+        criada = true;
+        setIaDigitando(false);
         setChatMessages(prev => [...prev, {
-          id: `msg-${Date.now() + 1}`,
+          id: idResposta,
           sender: 'IA de Contexto · MeuLab',
           role: 'Assistente de implantação',
           timestamp: agora(),
-          text: resposta,
+          text: acumulado,
           aiProcessed: true,
         }]);
-        showToast('A IA de Contexto respondeu com base nos documentos do cliente.');
-      })
+      } else {
+        setChatMessages(prev => prev.map(m => (m.id === idResposta ? { ...m, text: acumulado } : m)));
+      }
+    })
       .catch(() => showToast('Não foi possível falar com a IA de Contexto (backend fora do ar?).'))
       .finally(() => setIaDigitando(false));
   };

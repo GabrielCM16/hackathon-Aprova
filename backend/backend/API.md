@@ -1,14 +1,48 @@
 # API do Prumo (backend)
 
-Base: `http://localhost:8000` · JSON em UTF-8 · documentação interativa em `/docs`.
+Base: `http://localhost:8000` · JSON em UTF-8 · documentação interativa em `/docs` · CORS liberado.
+Para subir tudo (backend + front): `python rodar.py` na raiz do repositório.
 
 O fluxo tem duas fases:
 
 1. **Contexto (antes da reunião).** Os arquivos do cliente (histórico de conversas, PDFs, imagens, planilhas) são
    analisados **uma vez** e viram um `contexto.md` consolidado, um glossário, um checklist e as perguntas rápidas.
+   Tudo fica salvo em disco: depois disso, ler o contexto ou perguntar sobre ele **não reprocessa nada**.
 2. **Sessão (durante a reunião).** A sessão é ligada a um contexto. O áudio é só transcrito (rota rápida).
    A análise roda em segundo plano a cada ~30s de fala, marca o checklist, sugere perguntas e anota.
    A interface lê o estado por `GET /copiloto` ou recebe tudo ao vivo por `GET /eventos` (SSE).
+
+---
+
+## O contexto já salvo: MeuLab · IFPR Cascavel
+
+O ponto forte da demo é que o cliente **já chega conhecido**. O contexto `meulab-ifpr-cascavel` está processado e
+salvo em `backend/contextos/meulab-ifpr-cascavel/`, pronto para uso, sem precisar chamar `/processar` de novo.
+
+| | |
+|---|---|
+| Cliente | Implantação do MeuLab (agenda de laboratórios, almoxarifado e aprovação de práticas) no IFPR – Campus Cascavel |
+| Arquivos | `01_proposta_tecnica_MeuLab.md`, `02_ata_kickoff_IFPR.md`, `03_inventario_almoxarifado_quimica.csv`, `04_email_tecnico_almoxarifado.txt` (os `.md` fazem o papel dos PDFs; pessoas e documentos são fictícios) |
+| `contexto.md` | seções *Cliente e pessoas · Situação atual · Regras de negócio · Decisões já tomadas · Problemas e riscos · Pendências* |
+| Checklist | 14 itens: **4 confirmados** (CHK-01 laboratórios do piloto, CHK-02 perfis, CHK-03 login por e-mail institucional, CHK-04 só técnicos movimentam estoque) e **10 pendentes** (antecedência, tempo de preparo, aprovação, bloqueios de TCC, reagendamento, estoque mínimo, resíduos, Anatomia, integração, Fase 2) |
+| Glossário | nomes (Helena Duarte, Marcos Vieira, Rafael Nogueira, Luana Ferraz…), termos de laboratório e reagentes → vão para o prompt da transcrição |
+| Perguntas rápidas | 5 chips (antecedência, preparo, quem aprova, TCC, laboratórios do piloto) |
+
+O contexto é **parcial de propósito**: parte dos fatos só aparece na reunião, para o copiloto mostrar informação nova
+e divergências ao vivo (ex.: preparo de prática simples sai 40 min na conversa, contra 30 min de referência → `diverge: true`).
+
+### Como o front pega as coisas
+
+```ts
+// tudo de uma vez: arquivos, contexto.md, glossário, checklist, perguntas rápidas
+GET  /contextos/meulab-ifpr-cascavel
+// conteúdo de um documento (texto original + extração da IA) — usado ao clicar numa citação [[nome]]
+GET  /contextos/meulab-ifpr-cascavel/arquivos/01_proposta_tecnica_MeuLab.md
+// chat sobre o contexto, resposta chegando aos pedaços
+POST /contextos/meulab-ifpr-cascavel/perguntar/stream   {texto, historico}
+// reunião: cria a sessão ligada ao contexto (checklist copiado, confirmados já respondidos)
+POST /sessoes   {contexto_id: "meulab-ifpr-cascavel", ...}
+```
 
 ---
 
@@ -16,22 +50,32 @@ O fluxo tem duas fases:
 
 | Tela | Rota |
 |---|---|
+| Painel do cliente (documentos, contexto, checklist) | `GET /contextos/{id}` |
+| Abrir um documento / citação `[[arquivo]]` | `GET /contextos/{id}/arquivos/{nome}` |
+| Chat sobre o contexto (antes da reunião) | `POST /contextos/{id}/perguntar/stream` |
 | Card "Preparação da sessão" + mensagem de abertura | `POST /sessoes` → `preparacao`, ou `GET /sessoes/{id}/preparacao` |
 | Modo de escuta (Gravação com aviso / Escuta sem guardar / Modo notas) | `PATCH /sessoes/{id}` `{modo}` |
 | Caixa "Participantes informados" + botão **Iniciar reunião** | `POST /sessoes/{id}/iniciar` `{aviso_confirmado: true}` |
 | Status no topo (Preparando / Ouvindo / Finalizada) | `copiloto.estado` |
 | "Última fala" | `copiloto.ultima_fala` |
-| Aba Checklist: barra "4 de 10 · 40%" | `copiloto.progresso` (`respondida`, `total`, `percentual`) |
+| Aba Checklist: barra "4 de 14 · 29%" | `copiloto.progresso` (`respondida`, `total`, `percentual`) |
 | Grupo "Confirmados pelo contexto" | itens com `fonte == "contexto"` |
 | Grupo "Pendentes de alinhamento" | itens com `status` `pendente` ou `parcial` |
 | Código `CHK-05`, título, valor à direita | `codigo`, `titulo`, `resposta` ou `valor_referencia` |
 | Expandir item (pergunta, trecho, hora) | `pergunta`, `trecho`, `hora`, `diverge` |
 | Marcar item à mão | `PATCH /sessoes/{id}/checklist/{item_id}` |
 | Busca no checklist | feita no cliente, sobre `copiloto.checklist` |
-| Chips "Rápido: Qual o recuo? …" | `copiloto.perguntas_rapidas` |
+| Chips "Rápido: Quem aprova a prática? …" | `copiloto.perguntas_rapidas` |
 | Caixa "Pergunte algo rápido" | `POST /sessoes/{id}/perguntar` |
 | Mensagens do Prumo na conversa (pergunte agora, anotações) | `copiloto.sugestao_pergunta_imediata`, `perguntas_sugeridas`, `anotacoes` |
 | Encerrar e ata | `POST /sessoes/{id}/finalizar`, `GET /sessoes/{id}/ata` |
+
+---
+
+## 0. Saúde
+
+### `GET /`
+`{"status": "online", "modelos_transcricao": [...], "modelos_analise": [...], "analisar_a_cada_s": 30}`
 
 ---
 
@@ -56,18 +100,39 @@ Acima de 18 MB o arquivo vai pela File API do Gemini.
 ### `GET /contextos`
 Lista os contextos.
 ```json
-[{"id": "serra-do-sabia-alvara", "nome": "Alvará de Construção Residencial · Serra do Sabiá",
-  "descricao": "...", "criado_em": "2026-10-24T13:53:18", "itens_checklist": 12, "tem_contexto": true}]
+[{"id": "meulab-ifpr-cascavel", "nome": "MeuLab · IFPR Cascavel",
+  "descricao": "...", "criado_em": "2026-10-24T14:51:59", "itens_checklist": 14, "tem_contexto": true}]
 ```
 
 ### `POST /contextos`
 ```json
-{"nome": "Alvará de Construção Residencial · Serra do Sabiá", "descricao": "opcional", "id": "opcional"}
+{"nome": "MeuLab · IFPR Cascavel", "descricao": "opcional", "id": "opcional"}
 ```
 O `id` padrão é gerado a partir do nome. Retorna o contexto completo, ou `409` se o id já existir.
 
-### `GET /contextos/{id}`
-Contexto completo: `arquivos` (com `processado_em` e `erro`), `contexto`, `glossario`, `checklist` e `perguntas_rapidas`.
+### `GET /contextos/{id}` — o principal
+Contexto completo, lido do disco (sem chamar o Gemini):
+```json
+{
+  "id": "meulab-ifpr-cascavel", "nome": "MeuLab · IFPR Cascavel", "descricao": "...",
+  "criado_em": "2026-10-24T14:51:59", "itens_checklist": 14, "tem_contexto": true,
+  "arquivos": [{"nome": "01_proposta_tecnica_MeuLab.md", "bytes": 5120,
+                "processado_em": "2026-10-24T14:53:02", "erro": null}],
+  "contexto": "# Cliente e pessoas
+...",
+  "glossario": ["MeuLab", "IFPR Cascavel", "..."],
+  "checklist": [{"id": "...", "codigo": "CHK-01", "...": "..."}],
+  "perguntas_rapidas": ["Qual a antecedência mínima da reserva?", "..."]
+}
+```
+`processado_em` fica `null` quando o arquivo é novo ou mudou desde a última extração.
+
+### `GET /contextos/{id}/arquivos/{nome}`
+Um documento do contexto: o texto original (para `.txt .md .csv .json .log .html .xml .docx`; `null` em PDF/imagem/áudio)
+e a extração feita pela IA.
+```json
+{"nome": "02_ata_kickoff_IFPR.md", "bytes": 3400, "texto": "# Ata ...", "extracao": "..."}
+```
 
 ### `POST /contextos/{id}/arquivos`
 `multipart/form-data` com um ou mais campos `arquivos`. Só salva os arquivos; para analisar, chame `/processar`.
@@ -79,7 +144,7 @@ Remove o arquivo e a extração dele.
 Extrai **só os arquivos novos ou alterados** e reconsolida tudo. Com `forcar=true`, refaz todos.
 Leva de 10s a 2 min, conforme o tamanho.
 ```json
-{"extraidos": ["01_historico_reunioes.txt"], "erros": {}, "consolidado": true, "itens_checklist": 12, ...}
+{"extraidos": ["04_email_tecnico_almoxarifado.txt"], "erros": {}, "consolidado": true, "itens_checklist": 14, ...}
 ```
 Na consolidação, os itens novos do checklist entram sem duplicar os existentes. Os confirmados ficam no topo e a lista é renumerada (`CHK-01…`).
 
@@ -91,18 +156,32 @@ Substitui o glossário, removendo duplicados sem diferenciar maiúsculas.
 
 ### `PUT /contextos/{id}/perguntas-rapidas` `{perguntas: [...]}`
 
+### `POST /contextos/{id}/perguntar` · `POST /contextos/{id}/perguntar/stream`
+Chat sobre o contexto, antes da reunião. Usa o `contexto.md`, as extrações de cada documento e o checklist.
+```json
+{"texto": "Quem aprova as práticas?",
+ "historico": [{"pergunta": "...", "resposta": "..."}]}
+```
+`historico` é opcional (só as últimas 8 trocas entram no prompt).
+- `/perguntar` devolve `{"hora", "pergunta", "resposta"}`.
+- `/perguntar/stream` devolve `text/plain` chegando aos pedaços. A resposta começa com a etiqueta
+  `[confirmado]`, `[pendente]` ou `[nao_consta]` e cita os documentos como `[[nome do arquivo]]`.
+
+Sem `historico`, a mesma pergunta sobre o mesmo contexto sai de um **cache em memória**, na hora; o cache muda sozinho
+quando o contexto, o checklist ou as extrações mudam. `422` para pergunta vazia, `503` se nenhum modelo do Gemini responder.
+
 ### `GET /contextos/{id}/checklist` · `PUT` (substitui tudo) · `POST` (adiciona um)
 Item do checklist do contexto:
 ```json
 {
   "id": "a1b2c3d4",
-  "codigo": "CHK-08",
-  "titulo": "Recuo frontal mínimo da ZR2",
-  "pergunta": "Qual é o recuo frontal mínimo na ZR2 na versão publicada da lei?",
-  "categoria": "Parâmetros",
+  "codigo": "CHK-06",
+  "titulo": "Tempo de preparo por tipo de prática",
+  "pergunta": "Quanto tempo o técnico precisa para preparar cada tipo de prática?",
+  "categoria": "Agenda",
   "obrigatoria": true,
   "origem": "ia",
-  "valor_referencia": "4,50 m",
+  "valor_referencia": "30 min simples · 1 h capela",
   "confirmado_no_contexto": false,
   "resposta_contexto": null
 }
@@ -119,20 +198,20 @@ Na pasta `backend/sessoes/<id>/`: `sessao.json`, `segmentos.jsonl` (fonte da ver
 
 ### `POST /sessoes`
 ```json
-{"contexto_id": "serra-do-sabia-alvara", "titulo": "Alvará de Construção Residencial · Serra do Sabiá",
+{"contexto_id": "meulab-ifpr-cascavel", "titulo": "Alinhamento MeuLab · IFPR Cascavel",
  "horario": "14:00", "modo": "gravacao", "id": "opcional"}
 ```
 Cria a sessão e copia o checklist do contexto. Os itens confirmados chegam como `respondida`, com `fonte: "contexto"`.
 Retorna o estado e a `preparacao`:
 ```json
 {
-  "titulo": "Alvará de Construção Residencial · Serra do Sabiá",
+  "titulo": "Alinhamento MeuLab · IFPR Cascavel",
   "horario": "14:00",
-  "contexto": {"id": "serra-do-sabia-alvara", "nome": "..."},
-  "total": 12, "confirmados_contexto": 5, "a_perguntar": 7,
+  "contexto": {"id": "meulab-ifpr-cascavel", "nome": "..."},
+  "total": 14, "confirmados_contexto": 4, "a_perguntar": 10,
   "modo": "gravacao", "modos": ["gravacao", "sem_guardar", "notas"],
   "aviso_confirmado": false, "estado": "preparando",
-  "mensagem": "Reunião de hoje, 14:00: Alvará de ... O checklist tem 12 itens: 5 já estão confirmados pelo contexto do cliente e 7 faltam perguntar."
+  "mensagem": "Reunião de hoje, 14:00: Alinhamento MeuLab ... O checklist tem 14 itens: 4 já estão confirmados pelo contexto do cliente e 10 faltam perguntar."
 }
 ```
 
@@ -173,7 +252,7 @@ Um cliente que não chama esta rota, como a extensão do Chrome, inicia a sessã
 | `duracao_ms` | recomendado | conta para disparar a análise a cada ~30s de fala |
 
 ```json
-{"seq": 3, "hora": "14:12:07", "status": "ok", "texto": "o recuo frontal ficou em 5 m, e não 4,5 como estava na minuta."}
+{"seq": 3, "hora": "14:12:07", "status": "ok", "texto": "a prática simples leva uns 40 minutos de preparo, não 30."}
 ```
 `status`: `ok` | `silencio` | `falha`. Em caso de falha, o trecho é reprocessado sozinho em segundo plano.
 A resposta **não traz a análise**; ela chega por `/copiloto` ou `/eventos`.
@@ -189,32 +268,32 @@ A resposta **não traz a análise**; ela chega por `/copiloto` ou `/eventos`.
   "sessao": "2026-10-26_14-00-00",
   "estado": "ouvindo",
   "modo": "gravacao",
-  "contexto": {"id": "serra-do-sabia-alvara", "nome": "..."},
+  "contexto": {"id": "meulab-ifpr-cascavel", "nome": "..."},
   "atualizado_em": "14:12:40",
   "ultima_fala": {"seq": 3, "hora": "14:12:07", "texto": "..."},
-  "perguntas_rapidas": ["Qual o recuo da ZR2?", "Qual a taxa do alvará?", "Qual o prazo de análise?"],
+  "perguntas_rapidas": ["Qual a antecedência mínima da reserva?", "Quem aprova a prática?", "..."],
   "resumo": "…",
-  "sugestao_pergunta_imediata": "A vistoria VIS-TEC vale para todo projeto acima de 500 m²?",
+  "sugestao_pergunta_imediata": "Esse tempo de 40 min vale também para práticas na capela?",
   "perguntas_sugeridas": ["…", "…"],
   "checklist": [
     {
-      "id": "a1b2c3d4", "codigo": "CHK-08", "titulo": "Recuo frontal mínimo da ZR2",
-      "pergunta": "…", "categoria": "Parâmetros", "obrigatoria": true,
-      "valor_referencia": "4,50 m",
+      "id": "a1b2c3d4", "codigo": "CHK-06", "titulo": "Tempo de preparo por tipo de prática",
+      "pergunta": "…", "categoria": "Agenda", "obrigatoria": true,
+      "valor_referencia": "30 min simples · 1 h capela",
       "status": "respondida",
-      "resposta": "5,00 m",
+      "resposta": "40 min (prática simples)",
       "fonte": "conversa",
       "diverge": true,
-      "trecho": "ficou em 5 m, e não 4,5 como estava na minuta",
+      "trecho": "leva uns 40 minutos de preparo, não 30",
       "hora": "14:12:07",
       "manual": false
     }
   ],
-  "progresso": {"pendente": 1, "parcial": 0, "respondida": 11, "ignorada": 0, "total": 12,
-                "percentual": 92, "confirmados_contexto": 5, "obrigatorias_pendentes": 0},
+  "progresso": {"pendente": 1, "parcial": 0, "respondida": 11, "ignorada": 0, "total": 14,
+                "percentual": 93, "confirmados_contexto": 4, "obrigatorias_pendentes": 0},
   "anotacoes": {
-    "ia": ["Diverge do contexto: recuo frontal da ZR2 é 5 m na versão publicada (minuta dizia 4,50 m)."],
-    "manuais": [{"hora": "14:05:10", "texto": "Juliana pediu treinamento presencial"}]
+    "ia": ["Diverge do contexto: preparo de prática simples é 40 min (referência dizia 30 min)."],
+    "manuais": [{"hora": "14:05:10", "texto": "Marcos pediu treinamento presencial"}]
   },
   "regras_negocio": ["…"], "pendencias": ["…"], "resolvidos": ["…"]
 }
@@ -237,7 +316,7 @@ Ao conectar, o primeiro evento já é um `copiloto` completo. O servidor envia u
 
 ### `PATCH /sessoes/{id}/checklist/{item_id}`
 ```json
-{"status": "respondida", "resposta": "5,00 m"}
+{"status": "respondida", "resposta": "40 min"}
 ```
 Os dois campos são opcionais. Depois de marcado à mão, a IA não muda mais o item.
 Voltar o item para `pendente` devolve o controle para a IA. Retorna `404` para item inexistente e `422` para status inválido.
@@ -251,7 +330,7 @@ Lê ou adiciona anotações manuais. Elas também entram na análise e na ata.
 ### `POST /sessoes/{id}/perguntar` `{texto}`
 Chat com o copiloto, que usa o contexto, o checklist, as anotações e a transcrição.
 ```json
-{"hora": "14:13:02", "pergunta": "Qual o recuo?", "resposta": "O recuo frontal mínimo na ZR2 é de 5 metros [14:12:07].", "modelo": "gemini-3.5-flash"}
+{"hora": "14:13:02", "pergunta": "Qual o tempo de preparo?", "resposta": "Prática simples: 40 min [14:12:07].", "modelo": "gemini-3.5-flash"}
 ```
 Retorna `503` se nenhum modelo do Gemini responder.
 
@@ -274,28 +353,14 @@ Retranscreve os trechos que ficaram em `falhas/`, por exemplo depois de reinicia
 
 ---
 
-## Exemplo de teste: MeuLab · IFPR Cascavel
+## Recarregar o exemplo MeuLab do zero
 
-Os arquivos ficam em `backend/exemplos/meulab/` (dados fictícios; os `.md` fazem o papel dos PDFs):
-
-| arquivo | conteúdo |
-|---|---|
-| `01_proposta_tecnica_MeuLab.md` | proposta PT-2026-031: módulos, fases, perfis, 6 laboratórios preliminares |
-| `02_ata_kickoff_IFPR.md` | kickoff de 10/10: decisões confirmadas e o que ficou sem fechamento |
-| `03_inventario_almoxarifado_quimica.csv` | inventário do almoxarifado, com estoques mínimos faltando |
-| `04_email_tecnico_almoxarifado.txt` | e-mail do técnico: processo atual, tempos de preparo estimados, resíduos |
-| `_curadoria.json` | checklist, glossário e perguntas rápidas aplicados depois do processamento |
-
-Para carregar, com o backend rodando:
+Os originais ficam em `backend/exemplos/meulab/` (mais `_curadoria.json`, com checklist, glossário e perguntas rápidas
+aplicados depois do processamento). Só é preciso se o contexto salvo for apagado. Com o backend rodando:
 ```
 python exemplos/carregar_exemplo.py http://localhost:8000
 ```
-Resultado: o contexto `meulab-ifpr-cascavel` com 14 itens.
-- **Confirmados pelo contexto:** laboratórios do piloto, perfis, login e quem movimenta o estoque.
-- **Pendentes:** antecedência, tempo de preparo, aprovação, bloqueios de TCC, reagendamento, estoque mínimo, resíduos, Anatomia, integração e Fase 2.
-
-O arquivo `exemplos/roteiros/meulab_reuniao2.txt` traz falas para simular a reunião.
-Nele, o tempo de preparo de prática simples é 40 min (a referência dizia 30), o que deve gerar `diverge: true`.
+O arquivo `exemplos/roteiros/meulab_reuniao2.txt` traz as falas para simular a reunião.
 
 ---
 
@@ -305,9 +370,14 @@ Nele, o tempo de preparo de prática simples é 40 min (a referência dizia 30),
 |---|---|---|
 | `GEMINI_API_KEY` | — | obrigatória |
 | `PORTA` | 8000 | |
-| `MODELOS_TRANSCRICAO` / `MODELOS_ANALISE` | flash, flash-lite, flash-lite-latest | ordem de fallback |
+| `MODELOS_TRANSCRICAO` / `MODELOS_ANALISE` | gemini-3.5-flash, gemini-3.5-flash-lite, gemini-flash-lite-latest | ordem de fallback |
+| `TIMEOUT_TRANSCRICAO_S` / `TIMEOUT_ANALISE_S` / `TIMEOUT_CONTEXTO_S` | 20 / 45 / 180 | |
+| `MAX_CHAMADAS_SIMULTANEAS` | 4 | chamadas ao Gemini em paralelo |
 | `ANALISAR_A_CADA_S` | 30 | segundos de fala entre análises automáticas |
-| `CONTEXTO_ANALISE_CHARS` | 12000 | quanto do `contexto.md` entra no prompt ao vivo |
+| `CONTEXTO_ANALISE_CHARS` | 30000 | quanto do `contexto.md` entra no prompt ao vivo e do chat |
 | `GLOSSARIO_MAX_TERMOS` | 80 | termos enviados ao prompt da transcrição |
 | `CONSOLIDACAO_ORIGINAL_CHARS` | 120000 | até esse total, os textos originais entram na consolidação |
+| `JANELA_ANALISE_CHARS` | 15000 | quanto da transcrição entra em cada análise |
+| `ESPERAS_REPROCESSAR_S` | 10,30,90 | esperas entre tentativas de retranscrever falhas |
+| `MAX_CHARS_ARQUIVO` | 500000 | texto máximo lido de cada arquivo na extração |
 | `SALVAR_AUDIO` | 0 | `1` guarda todo o áudio (só no modo `gravacao`) |

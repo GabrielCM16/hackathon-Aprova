@@ -96,7 +96,8 @@ def main():
         subprocess.call([py, "exemplos/carregar_exemplo.py", API], cwd=BACKEND)
 
     print("[rodar] subindo front em http://localhost:3000")
-    env = {**os.environ, "VITE_API_URL": API, "VITE_CONTEXTO_ID": CONTEXTO}
+    # Sem VITE_API_URL: o front chama a API no mesmo host em que foi aberto (funciona de outro PC na rede)
+    env = {**os.environ, "VITE_CONTEXTO_ID": CONTEXTO}
     procs.append(subprocess.Popen([npm, "run", "dev"], cwd=FRONT, env=env))
 
     try:

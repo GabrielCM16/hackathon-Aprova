@@ -42,6 +42,10 @@ MIMES = {
 }
 TEXTO = {".txt", ".md", ".csv", ".json", ".log", ".html", ".xml"}
 
+# Respostas do chat do contexto, por pergunta + versão do contexto (só em memória)
+_CACHE_RESPOSTAS: dict[str, str] = {}
+MAX_HISTORICO = 8
+
 
 def _ler_json(arq: Path, padrao):
     try:
@@ -212,8 +216,9 @@ class Contexto:
         extracao = _ler_json(self.pasta_extracoes / f"{arq.name}.json", {}).get("conteudo")
         return {"nome": arq.name, "bytes": arq.stat().st_size, "texto": texto, "extracao": extracao}
 
-    def _texto_extracoes(self, max_chars: int = 40000) -> str:
-        """Extração de cada documento: o contexto.md consolidado resume, aqui vai o detalhe."""
+    def texto_extracoes(self, max_chars: int = 40000) -> str:
+        """Extração de cada documento: o contexto.md consolidado resume, aqui vai o detalhe.
+        Cada bloco começa com "### <nome do arquivo>", que é o nome que a IA usa nas citações [[...]]."""
         partes = []
         for arq in sorted(self.pasta_extracoes.glob("*.json")) if self.pasta_extracoes.exists() else []:
             conteudo = _ler_json(arq, {}).get("conteudo")
@@ -221,23 +226,52 @@ class Contexto:
                 partes.append(f"### {arq.stem}\n{conteudo}")
         return "\n\n".join(partes)[:max_chars]
 
-    async def perguntar(self, pergunta: str) -> dict:
+    def _prompt_pergunta(self, pergunta: str, historico: list[dict]) -> str:
         checklist = "\n".join(
             f"- {i['codigo']} {i['titulo']}: "
             + (f"confirmado ({i['resposta_contexto']})" if i["confirmado_no_contexto"]
                else f"pendente (referência: {i['valor_referencia'] or '-'})")
             for i in self.checklist)
-        texto, modelo = await gemini.gerar(
+        conversa = "\n".join(
+            f"Implantador: {h.get('pergunta', '')}\nAssistente: {h.get('resposta', '')}"
+            for h in historico[-MAX_HISTORICO:])
+        return prompts.PERGUNTA_CONTEXTO.format(
+            contexto=self.texto or "(sem contexto)",
+            documentos=self.texto_extracoes() or "(nenhum)",
+            checklist=checklist or "(vazio)",
+            historico=conversa or "(início da conversa)",
+            pergunta=pergunta,
+        )
+
+    def _chave_cache(self, pergunta: str) -> str:
+        """Muda sempre que o contexto, o checklist ou as extrações mudarem."""
+        base = json.dumps([self.id, self.texto, self.checklist, self.texto_extracoes(), _normalizar(pergunta)],
+                          ensure_ascii=False)
+        return hashlib.sha256(base.encode()).hexdigest()
+
+    async def perguntar_stream(self, pergunta: str, historico: Optional[list[dict]] = None):
+        """Resposta em pedaços. Sem histórico, a mesma pergunta sobre o mesmo contexto sai do cache, na hora."""
+        historico = historico or []
+        chave = None if historico else self._chave_cache(pergunta)
+        if chave and chave in _CACHE_RESPOSTAS:
+            yield _CACHE_RESPOSTAS[chave]
+            return
+        partes = []
+        async for pedaco in gemini.gerar_stream(
             config.MODELOS_ANALISE,
-            [prompts.PERGUNTA_CONTEXTO.format(contexto=self.texto or "(sem contexto)",
-                                              documentos=self._texto_extracoes() or "(nenhum)",
-                                              checklist=checklist or "(vazio)", pergunta=pergunta)],
+            [self._prompt_pergunta(pergunta, historico)],
             prompts.CONFIG_PERGUNTA,
             timeout=config.TIMEOUT_ANALISE_S,
             rotulo="pergunta contexto",
-        )
-        return {"hora": datetime.now().strftime("%H:%M:%S"), "pergunta": pergunta,
-                "resposta": texto.strip(), "modelo": modelo}
+        ):
+            partes.append(pedaco)
+            yield pedaco
+        if chave and partes:
+            _CACHE_RESPOSTAS[chave] = "".join(partes)
+
+    async def perguntar(self, pergunta: str, historico: Optional[list[dict]] = None) -> dict:
+        texto = "".join([p async for p in self.perguntar_stream(pergunta, historico)])
+        return {"hora": datetime.now().strftime("%H:%M:%S"), "pergunta": pergunta, "resposta": texto.strip()}
 
     def salvar_texto(self, texto: str) -> None:
         self.arq_contexto.write_text(texto, encoding="utf-8")

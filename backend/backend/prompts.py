@@ -76,7 +76,10 @@ CONSOLIDACAO = """Abaixo estão extrações de vários arquivos sobre o mesmo cl
 
 Produza:
 - contexto: um único documento Markdown consolidado (no máximo ~{max_chars} caracteres), sem duplicações, organizado em seções
-  (Cliente e pessoas, Situação atual, Regras de negócio, Decisões já tomadas, Problemas e riscos, Pendências).
+  (Cliente e pessoas, Produto e escopo contratado, Situação atual, Regras de negócio, Números prazos e quantidades,
+  Decisões já tomadas, Problemas e riscos, Pendências).
+  Em "Produto e escopo contratado", descreva o que o produto faz, os módulos e as fases, mesmo que pareça óbvio.
+  Preserve todos os números, prazos, quantidades e nomes; resuma o texto, nunca os dados.
   Quando houver informações conflitantes, mantenha a mais recente e registre o conflito.
 - glossario: até {max_termos} termos (nomes, siglas, sistemas, lugares) com a grafia correta, os mais importantes primeiro.
 - checklist: itens que precisam estar alinhados para configurar o sistema. UM VALOR POR ITEM: nunca agrupe
@@ -204,10 +207,17 @@ CONFIG_PERGUNTA = types.GenerateContentConfig(temperature=0.2)
 
 PERGUNTA_CONTEXTO = """Você é o assistente de implantação de software. O material abaixo é sobre a implantação de um produto
 em um cliente. Quando o implantador fala "o sistema", "a plataforma" ou "o produto", ele se refere ao produto sendo implantado.
-Entenda perguntas informais e com erros de digitação. Responda de forma curta e direta, em português,
-usando o contexto consolidado, os documentos e o checklist abaixo; diga de qual documento veio a informação quando souber.
-Se algo ainda não foi confirmado com o cliente, avise que está pendente. Só diga que não consta no material
-se de fato nenhum trecho abaixo tratar do assunto. Não use markdown com asteriscos.
+Entenda perguntas informais, com erros de digitação ou que continuam a conversa anterior.
+
+Formato da resposta (siga à risca):
+- Primeira linha: só uma etiqueta, [confirmado], [pendente] ou [nao_consta].
+  [confirmado] = SOMENTE se for decisão confirmada pelo cliente (item "confirmado" no CHECKLIST ou listado como decisão
+  confirmada em ata). Estimativas, chutes, sugestões, propostas, preferências, valores "a confirmar" e qualquer coisa
+  ligada a um item "pendente" do checklist são [pendente]. Na dúvida, use [pendente].
+  [nao_consta] = nenhum trecho do material trata do assunto.
+- Depois, a resposta curta e direta em português. Use listas com "- " quando houver vários itens. Sem asteriscos.
+- Cite a fonte logo depois da informação com o nome exato do arquivo entre colchetes duplos, como aparece
+  nos títulos "###" dos DOCUMENTOS, por exemplo [[02_ata_kickoff_IFPR.md]]. Não invente nomes de arquivo.
 
 CONTEXTO CONSOLIDADO:
 {contexto}
@@ -217,6 +227,9 @@ DOCUMENTOS (extração de cada arquivo):
 
 CHECKLIST:
 {checklist}
+
+CONVERSA ATÉ AGORA:
+{historico}
 
 PERGUNTA DO IMPLANTADOR:
 {pergunta}"""

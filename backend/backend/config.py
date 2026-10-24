@@ -46,7 +46,7 @@ TIMEOUT_CONTEXTO_S = _env("TIMEOUT_CONTEXTO_S", 180.0, float)
 # Texto máximo lido de cada arquivo (.txt/.md/.docx...) na extração
 MAX_CHARS_ARQUIVO = _env("MAX_CHARS_ARQUIVO", 500000, int)
 # Quanto do contexto.md entra no prompt da análise ao vivo e do chat
-CONTEXTO_ANALISE_CHARS = _env("CONTEXTO_ANALISE_CHARS", 12000, int)
+CONTEXTO_ANALISE_CHARS = _env("CONTEXTO_ANALISE_CHARS", 30000, int)
 # Quantos termos do glossário vão para o prompt da transcrição
 GLOSSARIO_MAX_TERMOS = _env("GLOSSARIO_MAX_TERMOS", 80, int)
 # Acima disso o arquivo vai pela File API do Gemini em vez de inline

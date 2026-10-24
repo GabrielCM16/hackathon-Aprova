@@ -1,7 +1,9 @@
 // Cliente da API do backend (contextos). URL e contexto vêm do rodar.py via variáveis VITE_*.
 import { Folder, PendingQuestion, RawFile, Rule } from './types';
 
-export const API_URL = (import.meta.env.VITE_API_URL as string) || 'http://localhost:8000';
+// Sem VITE_API_URL, usa o mesmo host da página: quem abre http://<ip>:3000 na rede fala com http://<ip>:8000.
+export const API_URL =
+  (import.meta.env.VITE_API_URL as string) || `${window.location.protocol}//${window.location.hostname}:8000`;
 export const CONTEXTO_ID = (import.meta.env.VITE_CONTEXTO_ID as string) || 'meulab-ifpr-cascavel';
 
 export interface ItemChecklist {
@@ -53,12 +55,44 @@ export const buscarContexto = () => chamar<ContextoCompleto>(`/contextos/${CONTE
 export const buscarArquivo = (nome: string) =>
   chamar<ConteudoArquivo>(`/contextos/${CONTEXTO_ID}/arquivos/${encodeURIComponent(nome)}`);
 
-export const perguntarContexto = (texto: string) =>
-  chamar<{ hora: string; resposta: string }>(`/contextos/${CONTEXTO_ID}/perguntar`, {
+export interface TrocaChat {
+  pergunta: string;
+  resposta: string;
+}
+
+// Resposta da IA chegando aos pedaços; onTexto recebe o texto acumulado a cada pedaço.
+export async function perguntarContextoStream(
+  texto: string,
+  historico: TrocaChat[],
+  onTexto: (acumulado: string) => void,
+): Promise<string> {
+  const r = await fetch(`${API_URL}/contextos/${CONTEXTO_ID}/perguntar/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ texto }),
+    body: JSON.stringify({ texto, historico }),
   });
+  if (!r.ok || !r.body) throw new Error(`${r.status} ${await r.text()}`);
+  const leitor = r.body.getReader();
+  const decoder = new TextDecoder();
+  let acumulado = '';
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    acumulado += decoder.decode(value, { stream: true });
+    onTexto(acumulado);
+  }
+  return acumulado;
+}
+
+// A resposta começa com [confirmado|pendente|nao_consta]; enquanto a etiqueta não fecha, nada aparece.
+export type Confianca = 'confirmado' | 'pendente' | 'nao_consta';
+
+export function separarConfianca(texto: string): { confianca: Confianca | null; corpo: string } {
+  const m = texto.match(/^\s*\[(confirmado|pendente|nao_consta)\]\s*/);
+  if (m) return { confianca: m[1] as Confianca, corpo: texto.slice(m[0].length) };
+  if (/^\s*\[[a-z_]*$/.test(texto)) return { confianca: null, corpo: '' };
+  return { confianca: null, corpo: texto };
+}
 
 // ---------- conversão para o formato das telas ----------
 

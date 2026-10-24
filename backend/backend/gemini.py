@@ -50,6 +50,45 @@ async def gerar(
     raise RuntimeError(ultimo_erro)
 
 
+async def gerar_stream(
+    modelos: Sequence[str],
+    contents: list,
+    cfg: types.GenerateContentConfig,
+    timeout: float,
+    rotulo: str,
+):
+    """Como gerar(), mas devolve o texto em pedaços (async generator de str).
+    O fallback entre modelos só acontece até o primeiro pedaço chegar; depois disso, um erro encerra o stream."""
+    ultimo_erro = "nenhum modelo configurado"
+    for modelo in modelos:
+        try:
+            async with _limite:
+                stream = await asyncio.wait_for(
+                    client.aio.models.generate_content_stream(model=modelo, contents=contents, config=cfg),
+                    timeout=timeout,
+                )
+                pedacos = stream.__aiter__()
+                primeiro = await asyncio.wait_for(pedacos.__anext__(), timeout=timeout)
+                if primeiro.text:
+                    yield primeiro.text
+                try:
+                    async for pedaco in pedacos:
+                        if pedaco.text:
+                            yield pedaco.text
+                except Exception as e:
+                    aviso(f"{rotulo} {modelo}: stream interrompido ({type(e).__name__})")
+                return
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            ultimo_erro = f"{modelo}: timeout {timeout:.0f}s"
+        except Exception as e:
+            codigo = getattr(e, "code", None) or type(e).__name__
+            ultimo_erro = f"{modelo}: {codigo}"
+        aviso(f"{rotulo} {ultimo_erro}, tentando outro modelo")
+    raise RuntimeError(ultimo_erro)
+
+
 async def enviar_arquivo(caminho, mime: str, espera_max_s: float = 120):
     """Sobe um arquivo grande pela File API e espera ficar pronto para uso."""
     arq = await client.aio.files.upload(file=caminho, config={"mime_type": mime})
